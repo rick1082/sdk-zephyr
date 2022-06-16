@@ -32,93 +32,26 @@ extern "C" {
 
 #define BT_AUDIO_BROADCAST_ID_SIZE               3 /* octets */
 
-/** @brief Audio Context Type, Generic Audio
+/** @brief Audio Context Type for Generic Audio
  *
- *  These values are defined by the Generic Audio Assigned Numbers
+ * These values are defined by the Generic Audio Assigned Numbers, bluetooth.com
  */
-/** @def BT_AUDIO_CONTEXT_TYPE_PROHIBITED
- *  @brief Prohibited. Excluded from usage.
- */
-#define BT_AUDIO_CONTEXT_TYPE_PROHIBITED         0
-/** @def BT_AUDIO_CONTEXT_TYPE_UNSPECIFIED
- *  @brief Unspecified type
- *
- *  Unspecified, matches any audio content.
- */
-#define BT_AUDIO_CONTEXT_TYPE_UNSPECIFIED        BIT(0)
-/** @def BT_AUDIO_CONTEXT_TYPE_CONVERSATIONAL
- *  @brief Conversational audio
- *
- *  Conversation between humans. as, for example, in telephony or video calls.
- */
-#define BT_AUDIO_CONTEXT_TYPE_CONVERSATIONAL     BIT(1)
-/** @def BT_AUDIO_CONTEXT_TYPE_MEDIA
- *  @brief Media
- *
- *  Media as, for example, in music, public radio, podcast or video soundtrack.
- *  Conversation between humans as, for example, in telephony or video calls.
- */
-#define BT_AUDIO_CONTEXT_TYPE_MEDIA              BIT(2)
-/** @def BT_AUDIO_CONTEXT_TYPE_GAME
- *  @brief Game audio
- *
- *  Audio assiociated with video gaming as, for example, gaming media, gaming effects;
- *  music and in-game voice chat between participants; or a mix of all the above.
- */
-#define BT_AUDIO_CONTEXT_TYPE_GAME               BIT(3)
-/** @def BT_AUDIO_CONTEXT_TYPE_INSTRUCTIONAL
- *  @brief Instructional audio
- *
- *  Instructional audio as, for example, in navigation, traffic announcements or user guidance.
- */
-#define BT_AUDIO_CONTEXT_TYPE_INSTRUCTIONAL      BIT(4)
-/** @def BT_AUDIO_CONTEXT_TYPE_VOICE_ASSISTANTS
- *  @brief Voice assistant audio
- *
- *  Man-machine communication, for example, with voice recognition or virtual assistants.
- */
-#define BT_AUDIO_CONTEXT_TYPE_VOICE_ASSISTANTS   BIT(5)
-/** @def BT_AUDIO_CONTEXT_TYPE_LIVE
- *  @brief Live audio
- *
- *  Live audio, for example, from a microphone where audio is perceived both through
- *  a direct acoustic path and through an LE Audio Stream.
- */
-#define BT_AUDIO_CONTEXT_TYPE_LIVE               BIT(6)
-/** @def BT_AUDIO_CONTEXT_TYPE_SOUND_EFFECTS
- *  @brief Sound effects
- *
- *  Sound effects including keyboard and touch feedback; menu and user interface sounds;
- *  and other system sounds.
- */
-#define BT_AUDIO_CONTEXT_TYPE_SOUND_EFFECTS      BIT(7)
-/** @def BT_AUDIO_CONTEXT_TYPE_NOTIFICATIONS
- *  @brief Notification and reminder sounds
- *
- *  Notification and reminder sounds; attention-seeking audio, for example, in beeps signaling
- *  the arrival of a message.
- */
-#define BT_AUDIO_CONTEXT_TYPE_NOTIFICATIONS      BIT(8)
-/** @def BT_AUDIO_CONTEXT_TYPE_RINGTONE
- *  @brief Ringtone as in a call alert
- *
- * Alerts the user to an incoming call, for example, an incoming telephony or video call,
- * including traditional cellular as well as VoIP and Push-to-Talk.
- */
-#define BT_AUDIO_CONTEXT_TYPE_RINGTONE           BIT(9)
-/** @def BT_AUDIO_CONTEXT_TYPE_ALERTS
- *  @brief Alarms and timers
- *
- *  Alarms and timers; immediate alerts, for example, in a critical battery alarm, timer expiry or
- *  alarm clock, toaster cooker, kettle, microwave, etc.
- */
-#define BT_AUDIO_CONTEXT_TYPE_ALERTS             BIT(10)
-/** @def BT_AUDIO_CONTEXT_TYPE_EMERGENCY_ALARM
- *  @brief Emergency alarm
- *
- *  Emergency alerts as, for example, with fire alarms or other urgent alerts.
- */
-#define BT_AUDIO_CONTEXT_TYPE_EMERGENCY_ALARM    BIT(11)
+enum bt_audio_context {
+	BT_AUDIO_CONTEXT_TYPE_PROHIBITED = 0,
+	BT_AUDIO_CONTEXT_TYPE_UNSPECIFIED = BIT(0),
+	BT_AUDIO_CONTEXT_TYPE_CONVERSATIONAL = BIT(1),
+	BT_AUDIO_CONTEXT_TYPE_MEDIA = BIT(2),
+	BT_AUDIO_CONTEXT_TYPE_GAME = BIT(3),
+	BT_AUDIO_CONTEXT_TYPE_INSTRUCTIONAL = BIT(4),
+	BT_AUDIO_CONTEXT_TYPE_VOICE_ASSISTANTS = BIT(5),
+	BT_AUDIO_CONTEXT_TYPE_LIVE = BIT(6),
+	BT_AUDIO_CONTEXT_TYPE_SOUND_EFFECTS = BIT(7),
+	BT_AUDIO_CONTEXT_TYPE_NOTIFICATIONS = BIT(8),
+	BT_AUDIO_CONTEXT_TYPE_RINGTONE = BIT(9),
+	BT_AUDIO_CONTEXT_TYPE_ALERTS = BIT(10),
+	BT_AUDIO_CONTEXT_TYPE_EMERGENCY_ALARM = BIT(11),
+};
+
 /** @def BT_AUDIO_CONTEXT_TYPE_ANY
  *
  * Any known context.
@@ -306,9 +239,9 @@ struct bt_audio_base {
 };
 
 /** @brief Audio Capability type */
-enum bt_audio_pac_type {
-	BT_AUDIO_SINK = 0x01,
-	BT_AUDIO_SOURCE = 0x02,
+enum bt_audio_dir {
+	BT_AUDIO_DIR_SINK = 0x01,
+	BT_AUDIO_DIR_SOURCE = 0x02,
 };
 
 /** @def BT_CODEC_QOS
@@ -921,7 +854,7 @@ struct bt_audio_unicast_server_cb {
 	 *
 	 *  @param[in]  conn    Connection object.
 	 *  @param[in]  ep      Local Audio Endpoint being configured.
-	 *  @param[in]  type    Type of the endpoint.
+	 *  @param[in]  dir     Direction of the endpoint.
 	 *  @param[in]  codec   Codec configuration.
 	 *  @param[out] stream  Pointer to stream that will be configured for
 	 *                      the endpoint.
@@ -933,7 +866,7 @@ struct bt_audio_unicast_server_cb {
 	 */
 	int (*config)(struct bt_conn *conn,
 		      const struct bt_audio_ep *ep,
-		      enum bt_audio_pac_type type,
+		      enum bt_audio_dir dir,
 		      const struct bt_codec *codec,
 		      struct bt_audio_stream **stream,
 		      struct bt_codec_qos_pref *const pref);
@@ -944,7 +877,7 @@ struct bt_audio_unicast_server_cb {
 	 *  reconfigured with different codec configuration.
 	 *
 	 *  @param[in]  stream  Stream object being reconfigured.
-	 *  @param[in]  type    Type of the endpoint.
+	 *  @param[in]  dir     Direction of the endpoint.
 	 *  @param[in]  codec   Codec configuration.
 	 *  @param[out] pref    Pointer to a QoS preference object that shall
 	 *                      be populated with values. Invalid values will
@@ -953,7 +886,7 @@ struct bt_audio_unicast_server_cb {
 	 *  @return 0 in case of success or negative value in case of error.
 	 */
 	int (*reconfig)(struct bt_audio_stream *stream,
-			uint8_t type,
+			enum bt_audio_dir dir,
 			const struct bt_codec *codec,
 			struct bt_codec_qos_pref *const pref);
 
@@ -1044,6 +977,24 @@ struct bt_audio_unicast_server_cb {
 	 */
 	int (*release)(struct bt_audio_stream *stream);
 
+	/** @brief Get available audio contexts callback
+	 *
+	 *  Get available audio contexts callback is called whenever a remote client
+	 *  requests to read the value of Published Audio Capabilities (PAC) Available
+	 *  Audio Contexts, or if the value needs to be notified.
+	 *
+	 *  @param[in]  conn     The connection that requests the available audio
+	 *                       contexts. Will be NULL if requested for sending
+	 *                       a notification, as a result of calling
+	 *                       bt_audio_unicast_server_available_contexts_changed().
+	 *  @param[in]  dir      Direction of the endpoint.
+	 *  @param[out] context  Pointer to the contexts that needs to be set.
+	 *
+	 *  @return 0 in case of success or negative value in case of error.
+	 */
+	int (*get_available_contexts)(struct bt_conn *conn, enum bt_audio_dir dir,
+				      enum bt_audio_context *context);
+
 	/** @brief Publish Capability callback
 	 *
 	 *  Publish Capability callback is called whenever a remote client
@@ -1070,6 +1021,7 @@ struct bt_audio_unicast_server_cb {
 	int (*publish_capability)(struct bt_conn *conn, uint8_t type,
 				  uint8_t index, struct bt_codec *const codec);
 
+#if defined(CONFIG_BT_PAC_SNK_LOC) || defined(CONFIG_BT_PAC_SRC_LOC)
 	/** @brief Publish location callback
 	 *
 	 *  Publish location callback is called whenever a remote client
@@ -1081,28 +1033,31 @@ struct bt_audio_unicast_server_cb {
 	 *                        for sending a notification, as a result of
 	 *                        calling
 	 *                        bt_audio_unicast_server_location_changed().
-	 *  @param[in]  type      Type of the endpoint.
+	 *  @param[in]  dir       Direction of the endpoint.
 	 *  @param[out] location  Pointer to the location that needs to be set.
 	 *
 	 *  @return 0 in case of success or negative value in case of error.
 	 */
 	int (*publish_location)(struct bt_conn *conn,
-				enum bt_audio_pac_type type,
+				enum bt_audio_dir dir,
 				enum bt_audio_location *location);
 
+#if defined(CONFIG_BT_PAC_SNK_LOC_WRITEABLE) || defined(CONFIG_BT_PAC_SRC_LOC_WRITEABLE)
 	/** @brief Write location callback
 	 *
 	 *  Write location callback is called whenever a remote client
 	 *  requests to write the Published Audio Capabilities (PAC) location.
 	 *
 	 *  @param conn      The connection that requests the write.
-	 *  @param type      Type of the endpoint.
+	 *  @param dir       Direction of the endpoint.
 	 *  @param location  The location being written.
 	 *
 	 *  @return 0 in case of success or negative value in case of error.
 	 */
-	int (*write_location)(struct bt_conn *conn, enum bt_audio_pac_type type,
+	int (*write_location)(struct bt_conn *conn, enum bt_audio_dir dir,
 			      enum bt_audio_location location);
+#endif /* CONFIG_BT_PAC_SNK_LOC_WRITEABLE || CONFIG_BT_PAC_SRC_LOC_WRITEABLE */
+#endif /* CONFIG_BT_PAC_SNK_LOC || CONFIG_BT_PAC_SRC_LOC */
 };
 
 /** Broadcast Audio Sink callback structure */
@@ -1342,9 +1297,19 @@ int bt_audio_unicast_server_unregister_cb(const struct bt_audio_unicast_server_c
  *
  * Notify connected clients that the location has changed
  *
+ * @param dir       Direction of the endpoint.
+ *
  * @return 0 in case of success or negative value in case of error.
  */
-int bt_audio_unicast_server_location_changed(enum bt_audio_pac_type type);
+int bt_audio_unicast_server_location_changed(enum bt_audio_dir dir);
+
+/** @brief Notify available audio contexts changed
+ *
+ * Notify connected clients that the available audio contexts has changed
+ *
+ * @return 0 in case of success or negative value in case of error.
+ */
+int bt_audio_unicast_server_available_contexts_changed(void);
 
 /** @} */ /* End of group bt_audio_server */
 
@@ -1368,7 +1333,7 @@ typedef void (*bt_audio_discover_func_t)(struct bt_conn *conn,
 
 struct bt_audio_discover_params {
 	/** Capabilities type */
-	uint8_t  type;
+	enum bt_audio_dir dir;
 	/** Callback function */
 	bt_audio_discover_func_t func;
 	/** Number of capabilities found */

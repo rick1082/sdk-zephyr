@@ -34,12 +34,12 @@ CREATE_FLAG(flag_stream_configured);
 
 static struct bt_audio_stream *lc3_config(struct bt_conn *conn,
 					struct bt_audio_ep *ep,
-					enum bt_audio_pac_type type,
+					enum bt_audio_dir dir,
 					struct bt_audio_capability *cap,
 					struct bt_codec *codec)
 {
-	printk("ASE Codec Config: conn %p ep %p type %u, cap %p\n",
-	       conn, ep, type, cap);
+	printk("ASE Codec Config: conn %p ep %p dir %u, cap %p\n",
+	       conn, ep, dir, cap);
 
 	print_codec(codec);
 
@@ -171,7 +171,7 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 static void init(void)
 {
 	static struct bt_audio_capability caps = {
-		.type = BT_AUDIO_SINK,
+		.dir = BT_AUDIO_DIR_SINK,
 		.pref = BT_AUDIO_CAPABILITY_PREF(
 				BT_AUDIO_CAPABILITY_UNFRAMED_SUPPORTED,
 				BT_GAP_LE_PHY_2M, 0x02, 10, 40000, 40000, 40000, 40000),
@@ -211,8 +211,8 @@ static void set_location(void)
 {
 	int err;
 
-	if (IS_ENABLED(CONFIG_BT_PAC_SNK)) {
-		err = bt_audio_capability_set_location(BT_AUDIO_SINK,
+	if (IS_ENABLED(CONFIG_BT_PAC_SNK_LOC)) {
+		err = bt_audio_capability_set_location(BT_AUDIO_DIR_SINK,
 						       BT_AUDIO_LOCATION_FRONT_CENTER);
 		if (err != 0) {
 			FAIL("Failed to set sink location (err %d)\n", err);
@@ -220,8 +220,8 @@ static void set_location(void)
 		}
 	}
 
-	if (IS_ENABLED(CONFIG_BT_PAC_SRC)) {
-		err = bt_audio_capability_set_location(BT_AUDIO_SINK,
+	if (IS_ENABLED(CONFIG_BT_PAC_SRC_LOC)) {
+		err = bt_audio_capability_set_location(BT_AUDIO_DIR_SINK,
 						       (BT_AUDIO_LOCATION_FRONT_LEFT |
 							BT_AUDIO_LOCATION_FRONT_RIGHT));
 		if (err != 0) {
@@ -233,11 +233,34 @@ static void set_location(void)
 	printk("Location successfully set\n");
 }
 
+static void set_available_contexts(void)
+{
+	int err;
+
+	err = bt_audio_capability_set_available_contexts(BT_AUDIO_DIR_SINK,
+						BT_AUDIO_CONTEXT_TYPE_MEDIA |
+						BT_AUDIO_CONTEXT_TYPE_CONVERSATIONAL);
+	if (IS_ENABLED(CONFIG_BT_PAC_SNK) && err != 0) {
+		FAIL("Failed to set sink available contexts (err %d)\n", err);
+		return;
+	}
+
+	err = bt_audio_capability_set_available_contexts(BT_AUDIO_DIR_SOURCE,
+						BT_AUDIO_CONTEXT_TYPE_NOTIFICATIONS);
+	if (IS_ENABLED(CONFIG_BT_PAC_SRC) && err != 0) {
+		FAIL("Failed to set source available contexts (err %d)\n", err);
+		return;
+	}
+
+	printk("Available contexts successfully set\n");
+}
+
 static void test_main(void)
 {
 	init();
 
 	set_location();
+	set_available_contexts();
 
 	/* TODO: When babblesim supports ISO, wait for audio stream to pass */
 
