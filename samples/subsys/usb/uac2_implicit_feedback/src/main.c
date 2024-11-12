@@ -520,15 +520,17 @@ int main(void)
 {
 	const struct device *dev = DEVICE_DT_GET(DT_NODELABEL(uac2_headset));
 	struct usbd_context *sample_usbd;
-	struct i2s_config config;
+	//struct i2s_config config;
 	int ret;
 
-	main_ctx.i2s_dev = DEVICE_DT_GET(DT_NODELABEL(i2s_rxtx));
+	//main_ctx.i2s_dev = DEVICE_DT_GET(DT_NODELABEL(i2s_rxtx));
 
+	/*
 	if (!device_is_ready(main_ctx.i2s_dev)) {
 		printk("%s is not ready\n", main_ctx.i2s_dev->name);
 		return 0;
 	}
+
 
 	config.word_size = SAMPLE_BIT_WIDTH;
 	config.channels = NUMBER_OF_CHANNELS;
@@ -551,7 +553,7 @@ int main(void)
 		printk("Failed to configure RX stream: %d\n", ret);
 		return 0;
 	}
-
+	*/
 	main_ctx.fb = feedback_init();
 
 	usbd_uac2_set_ops(dev, &usb_audio_ops, &main_ctx);
