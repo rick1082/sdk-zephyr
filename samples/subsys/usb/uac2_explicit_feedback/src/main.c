@@ -17,7 +17,7 @@
 #include <zephyr/drivers/i2s.h>
 #include <zephyr/logging/log.h>
 
-LOG_MODULE_REGISTER(uac2_sample, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(uac2_sample, 4);
 
 #define HEADPHONES_OUT_TERMINAL_ID UAC2_ENTITY_ID(DT_NODELABEL(out_terminal))
 
@@ -66,7 +66,7 @@ static void uac2_terminal_update_cb(const struct device *dev, uint8_t terminal,
 
 	ctx->terminal_enabled = enabled;
 	if (ctx->i2s_started && !enabled) {
-		i2s_trigger(ctx->i2s_dev, I2S_DIR_TX, I2S_TRIGGER_DROP);
+		//i2s_trigger(ctx->i2s_dev, I2S_DIR_TX, I2S_TRIGGER_DROP);
 		ctx->i2s_started = false;
 		ctx->i2s_blocks_written = 0;
 		feedback_reset_ctx(ctx->fb);
@@ -83,7 +83,7 @@ static void *uac2_get_recv_buf(const struct device *dev, uint8_t terminal,
 
 	if (terminal == HEADPHONES_OUT_TERMINAL_ID) {
 		__ASSERT_NO_MSG(size <= MAX_BLOCK_SIZE);
-
+		//LOG_INF("HEADPHONES_OUT_TERMINAL_ID");
 		if (!ctx->terminal_enabled) {
 			LOG_ERR("Buffer request on disabled terminal");
 			return NULL;
@@ -91,10 +91,11 @@ static void *uac2_get_recv_buf(const struct device *dev, uint8_t terminal,
 
 		ret = k_mem_slab_alloc(&i2s_tx_slab, &buf, K_NO_WAIT);
 		if (ret != 0) {
+			LOG_INF("ret = %d", ret);
 			buf = NULL;
 		}
 	}
-
+	//LOG_INF("0x%p data size: %d !", (void *)buf, size);
 	return buf;
 }
 
@@ -106,6 +107,7 @@ static void uac2_data_recv_cb(const struct device *dev, uint8_t terminal,
 
 	if (!ctx->terminal_enabled) {
 		k_mem_slab_free(&i2s_tx_slab, buf);
+		LOG_INF("!ctx->terimal_enabled");
 		return;
 	}
 
@@ -120,18 +122,25 @@ static void uac2_data_recv_cb(const struct device *dev, uint8_t terminal,
 		sys_cache_data_flush_range(buf, size);
 	}
 
-	LOG_DBG("Received %d data to input terminal %d", size, terminal);
-
-	ret = i2s_write(ctx->i2s_dev, buf, size);
+	//LOG_INF("Received %d data to input terminal %d", size, terminal);
+	static int i = 0;
+	i++;
+	int16_t sample[12];
+	if(i % 1000 == 0) {
+		LOG_HEXDUMP_INF(buf, 24, "USB data");
+	}
+	//ret = i2s_write(ctx->i2s_dev, buf, size);
+	k_mem_slab_free(&i2s_tx_slab, buf);
+	ret = 0;
 	if (ret < 0) {
 		ctx->i2s_started = false;
 		ctx->i2s_blocks_written = 0;
 		feedback_reset_ctx(ctx->fb);
 
 		/* Most likely underrun occurred, prepare I2S restart */
-		i2s_trigger(ctx->i2s_dev, I2S_DIR_TX, I2S_TRIGGER_PREPARE);
+		//i2s_trigger(ctx->i2s_dev, I2S_DIR_TX, I2S_TRIGGER_PREPARE);
 
-		ret = i2s_write(ctx->i2s_dev, buf, size);
+		//ret = i2s_write(ctx->i2s_dev, buf, size);
 		if (ret < 0) {
 			/* Drop data block, will try again on next frame */
 			k_mem_slab_free(&i2s_tx_slab, buf);
@@ -236,7 +245,7 @@ static void uac2_sof(const struct device *dev, void *user_data)
 	 */
 	if (!ctx->i2s_started && ctx->terminal_enabled &&
 	    ctx->i2s_blocks_written >= 2) {
-		i2s_trigger(ctx->i2s_dev, I2S_DIR_TX, I2S_TRIGGER_START);
+		//i2s_trigger(ctx->i2s_dev, I2S_DIR_TX, I2S_TRIGGER_START);
 		ctx->i2s_started = true;
 		feedback_start(ctx->fb, ctx->i2s_blocks_written);
 	}
@@ -257,9 +266,9 @@ int main(void)
 {
 	const struct device *dev = DEVICE_DT_GET(DT_NODELABEL(uac2_headphones));
 	struct usbd_context *sample_usbd;
-	struct i2s_config config;
+	//struct i2s_config config;
 	int ret;
-
+/*
 	main_ctx.i2s_dev = DEVICE_DT_GET(DT_NODELABEL(i2s_tx));
 
 	if (!device_is_ready(main_ctx.i2s_dev)) {
@@ -281,7 +290,7 @@ int main(void)
 		printk("Failed to configure TX stream: %d\n", ret);
 		return 0;
 	}
-
+*/
 	main_ctx.fb = feedback_init();
 
 	usbd_uac2_set_ops(dev, &usb_audio_ops, &main_ctx);
