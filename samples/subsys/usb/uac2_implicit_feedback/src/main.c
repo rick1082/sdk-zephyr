@@ -14,7 +14,7 @@
 #include <zephyr/device.h>
 #include <zephyr/usb/usbd.h>
 #include <zephyr/usb/class/usbd_uac2.h>
-#include <zephyr/drivers/i2s.h>
+//#include <zephyr/drivers/i2s.h>
 #include <zephyr/logging/log.h>
 
 LOG_MODULE_REGISTER(uac2_sample, LOG_LEVEL_INF);
@@ -88,18 +88,6 @@ static void uac2_terminal_update_cb(const struct device *dev, uint8_t terminal,
 		ctx->microphone_enabled = enabled;
 	}
 
-	if (ctx->i2s_started && !ctx->headphones_enabled &&
-	    !ctx->microphone_enabled) {
-		i2s_trigger(ctx->i2s_dev, I2S_DIR_BOTH, I2S_TRIGGER_DROP);
-		ctx->i2s_started = false;
-		ctx->i2s_counter = 0;
-		ctx->plus_ones = ctx->minus_ones = 0;
-		if (ctx->pending_mic_samples) {
-			k_mem_slab_free(&i2s_rx_slab, ctx->pending_mic_buf);
-			ctx->pending_mic_buf = NULL;
-			ctx->pending_mic_samples = 0;
-		}
-	}
 }
 
 static void *uac2_get_recv_buf(const struct device *dev, uint8_t terminal,
@@ -139,7 +127,7 @@ static void uac2_data_recv_cb(const struct device *dev, uint8_t terminal,
 		k_mem_slab_free(&i2s_tx_slab, buf);
 		return;
 	}
-
+	size = 24;
 	if (!size) {
 		/* This code path is expected when host only records microphone
 		 * data and is not streaming any audio to the headphones. Simply
@@ -169,27 +157,8 @@ static void uac2_data_recv_cb(const struct device *dev, uint8_t terminal,
 
 	LOG_DBG("Received %d data to input terminal %d", size, terminal);
 
-	ret = i2s_write(ctx->i2s_dev, buf, size);
-	if (ret < 0) {
-		ctx->i2s_started = false;
-		ctx->i2s_counter = 0;
-		ctx->plus_ones = ctx->minus_ones = 0;
-		if (ctx->pending_mic_samples) {
-			k_mem_slab_free(&i2s_rx_slab, ctx->pending_mic_buf);
-			ctx->pending_mic_buf = NULL;
-			ctx->pending_mic_samples = 0;
-		}
-
-		/* Most likely underrun occurred, prepare I2S restart */
-		i2s_trigger(ctx->i2s_dev, I2S_DIR_BOTH, I2S_TRIGGER_PREPARE);
-
-		ret = i2s_write(ctx->i2s_dev, buf, size);
-		if (ret < 0) {
-			/* Drop data block, will try again on next frame */
-			k_mem_slab_free(&i2s_tx_slab, buf);
-		}
-	}
-
+	//ret = i2s_write(ctx->i2s_dev, buf, size);
+	k_mem_slab_free(&i2s_tx_slab, buf);
 	if (ret == 0) {
 		ctx->i2s_counter++;
 	}
@@ -203,234 +172,7 @@ static void uac2_buf_release_cb(const struct device *dev, uint8_t terminal,
 	}
 }
 
-/* Determine next number of samples to send, called at most once every SOF */
-static int next_mic_num_samples(struct usb_i2s_ctx *ctx)
-{
-	int offset = feedback_samples_offset(ctx->fb);
-
-	/* The rolling buffers essentially handle controller dead time, i.e.
-	 * the buffers are used to prevent overcompensating on feedback offset.
-	 * Remove the oldest entry by shifting the values by one bit.
-	 */
-	ctx->plus_ones <<= 1;
-	ctx->minus_ones <<= 1;
-
-	if ((offset < 0) && (POPCOUNT(ctx->plus_ones) < -offset)) {
-		/* I2S buffer starts at least 1 sample before SOF, send nominal
-		 * + 1 samples to host in order to shift offset towards 0.
-		 */
-		ctx->plus_ones |= 1;
-		return SAMPLES_PER_SOF + 1;
-	}
-
-	if ((offset > 0) && (POPCOUNT(ctx->minus_ones) < offset)) {
-		/* I2S buffer starts at least 1 sample after SOF, send nominal
-		 * - 1 samples to host in order to shift offset towards 0
-		 */
-		ctx->minus_ones |= 1;
-		return SAMPLES_PER_SOF - 1;
-	}
-
-	/* I2S is either spot on, or the offset is expected to correct soon */
-	return SAMPLES_PER_SOF;
-}
-
-static void process_mic_data(const struct device *dev, struct usb_i2s_ctx *ctx)
-{
-	size_t num_bytes;
-	uint8_t *dst, *src;
-	uint8_t *mic_buf;
-	void *rx_block;
-	int ret;
-	int samples_to_send, mic_samples, rx_samples, leftover_samples;
-
-	samples_to_send = next_mic_num_samples(ctx);
-
-	if (ctx->pending_mic_samples >= samples_to_send) {
-		/* No need to fetch new I2S samples, this happens shortly after
-		 * we have "borrowed" samples from next buffer. This is expected
-		 * and means that the streams have synchronized.
-		 */
-		rx_block = NULL;
-		rx_samples = 0;
-	} else {
-		ret = i2s_read(ctx->i2s_dev, &rx_block, &num_bytes);
-		if (ret) {
-			/* No data available, I2S will restart soon */
-			return;
-		}
-		sys_cache_data_invd_range(rx_block, num_bytes);
-
-		/* I2S operates on 2 channels (stereo) */
-		rx_samples = num_bytes / (BYTES_PER_SAMPLE * 2);
-	}
-
-	/* Prepare microphone data to send, use pending samples if any */
-	src = rx_block;
-	if (ctx->pending_mic_buf) {
-		mic_buf = ctx->pending_mic_buf;
-		mic_samples = ctx->pending_mic_samples;
-		dst = &ctx->pending_mic_buf[mic_samples * BYTES_PER_SAMPLE];
-	} else if (rx_samples >= 1) {
-		/* First sample is already in place */
-		mic_buf = rx_block;
-		dst = &mic_buf[BYTES_PER_SAMPLE];
-		src += 2 * BYTES_PER_SAMPLE;
-		mic_samples = 1;
-		rx_samples--;
-	} else {
-		/* Something went horribly wrong, free the buffer and leave */
-		k_mem_slab_free(&i2s_rx_slab, rx_block);
-		return;
-	}
-
-	/* Copy as many samples as possible, stop if mic buffer is ready */
-	while ((mic_samples < samples_to_send) && (rx_samples > 0)) {
-		memcpy(dst, src, BYTES_PER_SAMPLE);
-
-		dst += BYTES_PER_SAMPLE;
-		src += 2 * BYTES_PER_SAMPLE;
-
-		mic_samples++;
-		rx_samples--;
-	}
-
-	/* Is mic buffer ready to go? */
-	if (mic_samples < samples_to_send) {
-		/* No, we have to borrow sample from next buffer. This can only
-		 * happen if we fully drained current receive buffer.
-		 */
-		__ASSERT_NO_MSG(rx_samples == 0);
-
-		if (rx_block != mic_buf) {
-			/* RX buffer no longer needed, samples are in mic_buf */
-			k_mem_slab_free(&i2s_rx_slab, rx_block);
-		}
-
-		ret = i2s_read(ctx->i2s_dev, &rx_block, &num_bytes);
-		if (ret) {
-			/* No data, I2S will likely restart due to error soon */
-			ctx->pending_mic_buf = mic_buf;
-			ctx->pending_mic_samples = mic_samples;
-			return;
-		}
-		sys_cache_data_invd_range(rx_block, num_bytes);
-
-		src = rx_block;
-		rx_samples = num_bytes / (BYTES_PER_SAMPLE * 2);
-	}
-
-	/* Copy remaining sample, under normal conditions (i.e. connected to
-	 * non-malicious host) this is guaranteed to fully fill mic_buf.
-	 */
-	while ((mic_samples < samples_to_send) && (rx_samples > 0)) {
-		memcpy(dst, src, BYTES_PER_SAMPLE);
-
-		dst += BYTES_PER_SAMPLE;
-		src += 2 * BYTES_PER_SAMPLE;
-
-		mic_samples++;
-		rx_samples--;
-	}
-
-	/* Are we still short on samples? */
-	if (mic_samples < samples_to_send) {
-		/* The only possibility for this code to execute is that we were
-		 * short on samples and the next block (pointed to by rx_block)
-		 * did not contain enough samples to fill the gap.
-		 */
-		__ASSERT_NO_MSG(rx_block != mic_buf);
-
-		/* Bailing out at this point likely leads to faster recovery.
-		 * Note that this should never happen during normal operation.
-		 */
-		ctx->pending_mic_buf = mic_buf;
-		ctx->pending_mic_samples = mic_samples;
-
-		/* RX buffer is no longer needed */
-		k_mem_slab_free(&i2s_rx_slab, rx_block);
-		return;
-	}
-
-	/* Handle any potential leftover, start by sanitizing length */
-	leftover_samples = mic_samples - samples_to_send + rx_samples;
-	if (leftover_samples > (MAX_BLOCK_SIZE / BYTES_PER_SAMPLE)) {
-		size_t dropped_samples =
-			leftover_samples - (MAX_BLOCK_SIZE / BYTES_PER_SAMPLE);
-
-		LOG_WRN("Too many leftover samples, dropping %d samples",
-			dropped_samples);
-		if (rx_samples >= dropped_samples) {
-			rx_samples -= dropped_samples;
-		} else {
-			mic_samples -= (dropped_samples - rx_samples);
-			rx_samples = 0;
-		}
-
-		leftover_samples = (MAX_BLOCK_SIZE / BYTES_PER_SAMPLE);
-	}
-
-	if (leftover_samples == 0) {
-		/* No leftover samples */
-		if ((rx_block != NULL) && (rx_block != mic_buf)) {
-			/* All samples were copied, free source buffer */
-			k_mem_slab_free(&i2s_rx_slab, rx_block);
-		}
-		rx_block = NULL;
-	} else if ((mic_samples > samples_to_send) ||
-		   ((rx_samples > 0) && (rx_block == mic_buf))) {
-		/* Leftover samples have to be copied to new buffer */
-		ret = k_mem_slab_alloc(&i2s_rx_slab, &rx_block, K_NO_WAIT);
-		if (ret != 0) {
-			LOG_WRN("Out of memory dropping %d samples",
-				leftover_samples);
-			mic_samples = samples_to_send;
-			rx_samples = 0;
-			rx_block = NULL;
-		}
-	}
-
-	/* At this point rx_block is either
-	 *   * NULL if there are no leftover samples, OR
-	 *   * src buffer if leftover data can be copied from back to front, OR
-	 *   * brand new buffer if there is leftover data in mic buffer.
-	 */
-	ctx->pending_mic_buf = rx_block;
-	ctx->pending_mic_samples = 0;
-
-	/* Copy excess samples from pending mic buf, if any */
-	if (mic_samples > samples_to_send) {
-		size_t bytes;
-
-		/* Samples in mic buffer are already compacted */
-		bytes = (mic_samples - samples_to_send) * BYTES_PER_SAMPLE;
-		memcpy(ctx->pending_mic_buf, &mic_buf[mic_samples], bytes);
-
-		ctx->pending_mic_samples = mic_samples - samples_to_send;
-		dst = &ctx->pending_mic_buf[bytes];
-	} else {
-		dst = ctx->pending_mic_buf;
-	}
-
-	/* Copy excess samples from src buffer, so we don't lose any */
-	while (rx_samples > 0) {
-		memcpy(dst, src, BYTES_PER_SAMPLE);
-
-		dst += BYTES_PER_SAMPLE;
-		src += 2 * BYTES_PER_SAMPLE;
-
-		ctx->pending_mic_samples++;
-		rx_samples--;
-	}
-
-	/* Finally send the microphone samples to host */
-	sys_cache_data_flush_range(mic_buf, mic_samples * BYTES_PER_SAMPLE);
-	if (usbd_uac2_send(dev, MICROPHONE_IN_TERMINAL_ID,
-			   mic_buf, mic_samples * BYTES_PER_SAMPLE) < 0) {
-		k_mem_slab_free(&i2s_rx_slab, mic_buf);
-	}
-}
-
+ static uint8_t __aligned(UDC_BUF_ALIGN) data_buffer[24] = {0};
 static void uac2_sof(const struct device *dev, void *user_data)
 {
 	ARG_UNUSED(dev);
@@ -439,71 +181,10 @@ static void uac2_sof(const struct device *dev, void *user_data)
 	if (ctx->i2s_started) {
 		feedback_process(ctx->fb);
 	}
-
-	/* If we didn't receive data since last SOF but either terminal is
-	 * enabled, then we have to come up with the buffer ourself to keep
-	 * I2S going.
-	 */
-	if (!ctx->usb_data_received &&
-	    (ctx->microphone_enabled || ctx->headphones_enabled)) {
-		/* No data received since last SOF but we have to keep going */
-		void *buf;
-		int ret;
-
-		ret = k_mem_slab_alloc(&i2s_tx_slab, &buf, K_NO_WAIT);
-		if (ret != 0) {
-			buf = NULL;
-		}
-
-		if (buf) {
-			/* Use size 0 to utilize zero-fill functionality */
-			uac2_data_recv_cb(dev, HEADPHONES_OUT_TERMINAL_ID,
-					  buf, 0, user_data);
-		}
+	if (usbd_uac2_send(dev, MICROPHONE_IN_TERMINAL_ID,
+			   data_buffer, ROUND_UP(data_buffer, UDC_BUF_GRANULARITY)) < 0) {
 	}
-	ctx->usb_data_received = false;
-
-	/* We want to maintain 3 SOFs delay, i.e. samples received from host
-	 * during SOF n should be transmitted on I2S during SOF n+3. This
-	 * provides enough wiggle room for software scheduling that effectively
-	 * eliminates "buffers not provided in time" problem.
-	 *
-	 * ">= 2" translates into 3 SOFs delay because the timeline is:
-	 * USB SOF n
-	 *   OUT DATA0 n received from host
-	 * USB SOF n+1
-	 *   DATA0 n is available to UDC driver (See Universal Serial Bus
-	 *   Specification Revision 2.0 5.12.5 Data Prebuffering) and copied
-	 *   to I2S buffer before SOF n+2; i2s_counter = 1
-	 *   OUT DATA0 n+1 received from host
-	 * USB SOF n+2
-	 *   DATA0 n+1 is copied; i2s_counter = 2
-	 *   OUT DATA0 n+2 received from host
-	 * USB SOF n+3
-	 *   This function triggers I2S start
-	 *   DATA0 n+2 is copied; i2s_counter is no longer relevant
-	 *   OUT DATA0 n+3 received from host
-	 */
-	if (!ctx->i2s_started &&
-	    (ctx->headphones_enabled || ctx->microphone_enabled) &&
-	    ctx->i2s_counter >= 2) {
-		i2s_trigger(ctx->i2s_dev, I2S_DIR_BOTH, I2S_TRIGGER_START);
-		ctx->i2s_started = true;
-		feedback_start(ctx->fb, ctx->i2s_counter);
-		ctx->i2s_counter = 0;
-	}
-
-	/* Start sending I2S RX data only when there are at least 3 buffers
-	 * ready with data. This guarantees that there'll always be a buffer
-	 * available from which sample can be borrowed.
-	 */
-	if (!ctx->rx_started && ctx->i2s_started && ctx->i2s_counter >= 3) {
-		ctx->rx_started = true;
-	}
-
-	if (ctx->rx_started) {
-		process_mic_data(dev, ctx);
-	}
+	return ;
 }
 
 static struct uac2_ops usb_audio_ops = {
@@ -520,40 +201,8 @@ int main(void)
 {
 	const struct device *dev = DEVICE_DT_GET(DT_NODELABEL(uac2_headset));
 	struct usbd_context *sample_usbd;
-	//struct i2s_config config;
 	int ret;
 
-	//main_ctx.i2s_dev = DEVICE_DT_GET(DT_NODELABEL(i2s_rxtx));
-
-	/*
-	if (!device_is_ready(main_ctx.i2s_dev)) {
-		printk("%s is not ready\n", main_ctx.i2s_dev->name);
-		return 0;
-	}
-
-
-	config.word_size = SAMPLE_BIT_WIDTH;
-	config.channels = NUMBER_OF_CHANNELS;
-	config.format = I2S_FMT_DATA_FORMAT_I2S;
-	config.options = I2S_OPT_BIT_CLK_MASTER | I2S_OPT_FRAME_CLK_MASTER;
-	config.frame_clk_freq = SAMPLE_FREQUENCY;
-	config.mem_slab = &i2s_tx_slab;
-	config.block_size = MAX_BLOCK_SIZE;
-	config.timeout = 0;
-
-	ret = i2s_configure(main_ctx.i2s_dev, I2S_DIR_TX, &config);
-	if (ret < 0) {
-		printk("Failed to configure TX stream: %d\n", ret);
-		return 0;
-	}
-
-	config.mem_slab = &i2s_rx_slab;
-	ret = i2s_configure(main_ctx.i2s_dev, I2S_DIR_RX, &config);
-	if (ret < 0) {
-		printk("Failed to configure RX stream: %d\n", ret);
-		return 0;
-	}
-	*/
 	main_ctx.fb = feedback_init();
 
 	usbd_uac2_set_ops(dev, &usb_audio_ops, &main_ctx);
