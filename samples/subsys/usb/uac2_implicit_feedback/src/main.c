@@ -172,17 +172,16 @@ static void uac2_buf_release_cb(const struct device *dev, uint8_t terminal,
 	}
 }
 
- static uint8_t __aligned(UDC_BUF_ALIGN) data_buffer[24] = {0};
+static uint8_t __aligned(UDC_BUF_ALIGN) data_buffer[ROUND_UP(24, UDC_BUF_GRANULARITY)] = {0};
 static void uac2_sof(const struct device *dev, void *user_data)
 {
+	int ret;
 	ARG_UNUSED(dev);
 	struct usb_i2s_ctx *ctx = user_data;
 
-	if (ctx->i2s_started) {
-		feedback_process(ctx->fb);
-	}
-	if (usbd_uac2_send(dev, MICROPHONE_IN_TERMINAL_ID,
-			   data_buffer, ROUND_UP(data_buffer, UDC_BUF_GRANULARITY)) < 0) {
+	ret = usbd_uac2_send(dev, MICROPHONE_IN_TERMINAL_ID, data_buffer, 12);
+	if (ret < 0) {
+		LOG_ERR("Failed to send data to host, ret = %d", ret);
 	}
 	return ;
 }
