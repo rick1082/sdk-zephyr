@@ -14,6 +14,8 @@
 #include <zephyr/device.h>
 #include <zephyr/usb/usbd.h>
 #include <zephyr/usb/class/usbd_uac2.h>
+#include <zephyr/usb/usbd.h>
+#include <zephyr/usb/class/usbd_hid.h>
 //#include <zephyr/drivers/i2s.h>
 #include <zephyr/logging/log.h>
 
@@ -119,7 +121,6 @@ static void uac2_data_recv_cb(const struct device *dev, uint8_t terminal,
 			      void *buf, uint16_t size, void *user_data)
 {
 	struct usb_i2s_ctx *ctx = user_data;
-	int ret;
 
 	ctx->usb_data_received = true;
 
@@ -159,9 +160,6 @@ static void uac2_data_recv_cb(const struct device *dev, uint8_t terminal,
 
 	//ret = i2s_write(ctx->i2s_dev, buf, size);
 	k_mem_slab_free(&i2s_tx_slab, buf);
-	if (ret == 0) {
-		ctx->i2s_counter++;
-	}
 }
 
 static void uac2_buf_release_cb(const struct device *dev, uint8_t terminal,
@@ -177,7 +175,6 @@ static void uac2_sof(const struct device *dev, void *user_data)
 {
 	int ret;
 	ARG_UNUSED(dev);
-	struct usb_i2s_ctx *ctx = user_data;
 
 	ret = usbd_uac2_send(dev, MICROPHONE_IN_TERMINAL_ID, data_buffer, 12);
 	if (ret < 0) {
@@ -194,8 +191,67 @@ static struct uac2_ops usb_audio_ops = {
 	.buf_release_cb = uac2_buf_release_cb,
 };
 
-static struct usb_i2s_ctx main_ctx;
+static void kb_iface_ready(const struct device *dev, const bool ready)
+{
+	LOG_INF("HID device %s interface is %s",
+		dev->name, ready ? "ready" : "not ready");
+}
 
+static int kb_get_report(const struct device *dev,
+			 const uint8_t type, const uint8_t id, const uint16_t len,
+			 uint8_t *const buf)
+{
+	LOG_WRN("Get Report not implemented, Type %u ID %u", type, id);
+
+	return 0;
+}
+
+static int kb_set_report(const struct device *dev,
+			 const uint8_t type, const uint8_t id, const uint16_t len,
+			 const uint8_t *const buf)
+{
+	return 0;
+}
+
+/* Idle duration is stored but not used to calculate idle reports. */
+static void kb_set_idle(const struct device *dev,
+			const uint8_t id, const uint32_t duration)
+{
+	LOG_INF("Set Idle %u to %u", id, duration);
+}
+
+static uint32_t kb_get_idle(const struct device *dev, const uint8_t id)
+{
+	return 0;
+}
+
+static void kb_set_protocol(const struct device *dev, const uint8_t proto)
+{
+	LOG_INF("Protocol changed to %s",
+		proto == 0U ? "Boot Protocol" : "Report Protocol");
+}
+
+static void kb_output_report(const struct device *dev, const uint16_t len,
+			     const uint8_t *const buf)
+{
+	LOG_HEXDUMP_DBG(buf, len, "o.r.");
+	kb_set_report(dev, HID_REPORT_TYPE_OUTPUT, 0U, len, buf);
+}
+
+struct hid_device_ops kb_ops = {
+	.iface_ready = kb_iface_ready,
+	.get_report = kb_get_report,
+	.set_report = kb_set_report,
+	.set_idle = kb_set_idle,
+	.get_idle = kb_get_idle,
+	.set_protocol = kb_set_protocol,
+	.output_report = kb_output_report,
+};
+
+
+static struct usb_i2s_ctx main_ctx;
+const struct device *hid_dev;
+static const uint8_t hid_report_desc[] = HID_KEYBOARD_REPORT_DESC();
 int main(void)
 {
 	const struct device *dev = DEVICE_DT_GET(DT_NODELABEL(uac2_headset));
@@ -204,7 +260,23 @@ int main(void)
 
 	main_ctx.fb = feedback_init();
 
+
 	usbd_uac2_set_ops(dev, &usb_audio_ops, &main_ctx);
+
+	hid_dev = DEVICE_DT_GET_ONE(zephyr_hid_device);
+	if (!device_is_ready(hid_dev)) {
+		LOG_ERR("HID Device is not ready");
+		return -EIO;
+	}
+
+	ret = hid_device_register(hid_dev,
+				  hid_report_desc, sizeof(hid_report_desc),
+				  &kb_ops);
+	if (ret != 0) {
+		LOG_ERR("Failed to register HID Device, %d", ret);
+		return ret;
+	}
+
 
 	sample_usbd = sample_usbd_init_device(NULL);
 	if (sample_usbd == NULL) {
@@ -215,6 +287,8 @@ int main(void)
 	if (ret) {
 		return ret;
 	}
+
+	LOG_INF("usbd_enable");
 
 	return 0;
 }
