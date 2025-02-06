@@ -8,6 +8,7 @@
 #include <zephyr/bluetooth/audio/audio.h>
 #include <zephyr/bluetooth/audio/bap.h>
 #include <zephyr/bluetooth/audio/bap_lc3_preset.h>
+#include "sw_codec_lc3.h"
 
 BUILD_ASSERT(strlen(CONFIG_BROADCAST_CODE) <= BT_AUDIO_BROADCAST_CODE_SIZE,
 	     "Invalid broadcast code");
@@ -60,30 +61,13 @@ static struct bt_bap_lc3_preset preset_active = BT_BAP_LC3_BROADCAST_PRESET_24_2
 #define MAX_FRAME_DURATION_US 10000
 #define MAX_NUM_SAMPLES       ((MAX_FRAME_DURATION_US * MAX_SAMPLE_RATE) / USEC_PER_SEC)
 
-#if defined(CONFIG_LIBLC3)
-#include "lc3.h"
+#define AUDIO_VOLUME            (INT16_MAX - 3000) /* codec does clipping above INT16_MAX - 3000 */
+#define AUDIO_TONE_FREQUENCY_HZ 400
 
-#if defined(CONFIG_USB_DEVICE_AUDIO)
-#include <zephyr/usb/usb_device.h>
-#include <zephyr/usb/class/usb_audio.h>
-#include <zephyr/sys/ring_buffer.h>
-
-/* USB Audio Data is downsampled from 48kHz to match broadcast preset when receiving data */
-#define USB_SAMPLE_RATE       48000
-#define USB_DOWNSAMPLE_RATE   BROADCAST_SAMPLE_RATE
-#define USB_FRAME_DURATION_US 1000
-#define USB_NUM_SAMPLES       ((USB_FRAME_DURATION_US * USB_DOWNSAMPLE_RATE) / USEC_PER_SEC)
-#define USB_BYTES_PER_SAMPLE  2
-#define USB_CHANNELS          2
-
-#define RING_BUF_USB_FRAMES  20
-#define AUDIO_RING_BUF_BYTES (USB_NUM_SAMPLES * USB_BYTES_PER_SAMPLE * RING_BUF_USB_FRAMES)
-#else /* !defined(CONFIG_USB_DEVICE_AUDIO) */
 
 #include <math.h>
 
-#define AUDIO_VOLUME            (INT16_MAX - 3000) /* codec does clipping above INT16_MAX - 3000 */
-#define AUDIO_TONE_FREQUENCY_HZ 400
+
 
 /**
  * Use the math lib to generate a sine-wave using 16 bit samples into a buffer.
@@ -105,25 +89,11 @@ static void fill_audio_buf_sin(int16_t *buf, int length_us, int frequency_hz, in
 		buf[i] = (int16_t)(AUDIO_VOLUME * sample);
 	}
 }
-#endif /* defined(CONFIG_USB_DEVICE_AUDIO) */
-#endif /* defined(CONFIG_LIBLC3) */
 
 static struct broadcast_source_stream {
 	struct bt_bap_stream stream;
 	uint16_t seq_num;
 	size_t sent_cnt;
-#if defined(CONFIG_LIBLC3)
-	lc3_encoder_t lc3_encoder;
-#if defined(CONFIG_BAP_BROADCAST_16_2_1)
-	lc3_encoder_mem_16k_t lc3_encoder_mem;
-#elif defined(CONFIG_BAP_BROADCAST_24_2_1)
-	lc3_encoder_mem_48k_t lc3_encoder_mem;
-#endif
-#if defined(CONFIG_USB_DEVICE_AUDIO)
-	struct ring_buf audio_ring_buf;
-	uint8_t _ring_buffer_memory[AUDIO_RING_BUF_BYTES];
-#endif /* defined(CONFIG_USB_DEVICE_AUDIO) */
-#endif /* defined(CONFIG_LIBLC3) */
 } streams[CONFIG_BT_BAP_BROADCAST_SRC_STREAM_COUNT];
 static struct bt_bap_broadcast_source *broadcast_source;
 
@@ -139,15 +109,14 @@ static K_SEM_DEFINE(sem_stopped, 0U, ARRAY_SIZE(streams));
 
 #define BROADCAST_SOURCE_LIFETIME 120U /* seconds */
 
-#if defined(CONFIG_LIBLC3)
 static int freq_hz;
 static int frame_duration_us;
 static int frames_per_sdu;
 static int octets_per_frame;
 
 static K_SEM_DEFINE(lc3_encoder_sem, 0U, TOTAL_BUF_NEEDED);
-#endif
 
+static uint16_t pcm_bytes_req_enc;
 static void send_data(struct broadcast_source_stream *source_stream)
 {
 	struct bt_bap_stream *stream = &source_stream->stream;
@@ -165,39 +134,18 @@ static void send_data(struct broadcast_source_stream *source_stream)
 	}
 
 	net_buf_reserve(buf, BT_ISO_CHAN_SEND_RESERVE);
-#if defined(CONFIG_LIBLC3)
 	uint8_t lc3_encoded_buffer[preset_active.qos.sdu];
+	uint16_t encoded_bytes_written;
 
-	if (source_stream->lc3_encoder == NULL) {
-		printk("LC3 encoder not setup, cannot encode data.\n");
-		net_buf_unref(buf);
-		return;
-	}
-
-#if defined(CONFIG_USB_DEVICE_AUDIO)
-	uint32_t size = ring_buf_get(&source_stream->audio_ring_buf, (uint8_t *)send_pcm_data,
-				     sizeof(send_pcm_data));
-
-	if (size < sizeof(send_pcm_data)) {
-		const size_t padding_size = sizeof(send_pcm_data) - size;
-
-		printk("Not enough bytes ready, padding %d!\n", padding_size);
-		memset(&((uint8_t *)send_pcm_data)[size], 0, padding_size);
-	}
-#endif
-
-	ret = lc3_encode(source_stream->lc3_encoder, LC3_PCM_FORMAT_S16, send_pcm_data, 1,
-			 octets_per_frame, lc3_encoded_buffer);
-	if (ret == -1) {
+	ret= sw_codec_lc3_enc_run(send_pcm_data, sizeof(send_pcm_data), octets_per_frame*8*100, 0, sizeof(lc3_encoded_buffer), lc3_encoded_buffer, &encoded_bytes_written);
+	if (ret) {
 		printk("LC3 encoder failed - wrong parameters?: %d", ret);
 		net_buf_unref(buf);
 		return;
 	}
 
 	net_buf_add_mem(buf, lc3_encoded_buffer, preset_active.qos.sdu);
-#else
-	net_buf_add_mem(buf, send_pcm_data, preset_active.qos.sdu);
-#endif /* defined(CONFIG_LIBLC3) */
+
 
 	ret = bt_bap_stream_send(stream, buf, source_stream->seq_num++);
 	if (ret < 0) {
@@ -213,9 +161,10 @@ static void send_data(struct broadcast_source_stream *source_stream)
 	}
 }
 
-#if defined(CONFIG_LIBLC3)
+
 static void init_lc3_thread(void *arg1, void *arg2, void *arg3)
 {
+	printk("init_lc3_thread\n");
 	const struct bt_audio_codec_cfg *codec_cfg = &preset_active.codec_cfg;
 	int ret;
 
@@ -252,11 +201,30 @@ static void init_lc3_thread(void *arg1, void *arg2, void *arg3)
 		return;
 	}
 
-#if !defined(CONFIG_USB_DEVICE_AUDIO)
+
 	/* If USB is not used as a sound source, generate a sine wave */
 	fill_audio_buf_sin(send_pcm_data, frame_duration_us, AUDIO_TONE_FREQUENCY_HZ, freq_hz);
-#endif
-
+	ret = sw_codec_lc3_init(NULL, NULL, MAX_FRAME_DURATION_US);
+	if (ret) {
+		printk("sw_codec_lc3_init failed (ret %d)\n", ret);
+	}
+	ret = sw_codec_lc3_enc_init(freq_hz, 16, MAX_FRAME_DURATION_US, octets_per_frame * 8 * 100,
+				    ARRAY_SIZE(streams), &pcm_bytes_req_enc);
+	if (ret) {
+		printk("sw_codec_lc3_enc_init failed (ret %d)\n", ret);
+	} else {
+		printk("LC3 encoder initialized, PCM bytes required for encoding: %u\n",
+		       pcm_bytes_req_enc);
+	}
+	while (true) {
+		for (size_t i = 0U; i < ARRAY_SIZE(streams); i++) {
+			k_sem_take(&lc3_encoder_sem, K_FOREVER);
+		}
+		for (size_t i = 0U; i < ARRAY_SIZE(streams); i++) {
+			send_data(&streams[i]);
+		}
+	}
+#if 0
 	/* Create the encoder instance. This shall complete before stream_started() is called. */
 	for (size_t i = 0U; i < ARRAY_SIZE(streams); i++) {
 		printk("Initializing lc3 encoder for stream %zu\n", i);
@@ -276,6 +244,7 @@ static void init_lc3_thread(void *arg1, void *arg2, void *arg3)
 			send_data(&streams[i]);
 		}
 	}
+#endif
 }
 
 #define LC3_ENCODER_STACK_SIZE 4 * 4096
@@ -284,60 +253,6 @@ static void init_lc3_thread(void *arg1, void *arg2, void *arg3)
 K_THREAD_DEFINE(encoder, LC3_ENCODER_STACK_SIZE, init_lc3_thread, NULL, NULL, NULL,
 		LC3_ENCODER_PRIORITY, 0, -1);
 
-#if defined(CONFIG_USB_DEVICE_AUDIO)
-static void data_received(const struct device *dev, struct net_buf *buffer, size_t size)
-{
-	static int count;
-	int16_t *pcm;
-	int nsamples, ratio;
-	int16_t usb_pcm_data[USB_CHANNELS][USB_NUM_SAMPLES];
-
-	if (!buffer) {
-		return;
-	}
-
-	if (!size) {
-		net_buf_unref(buffer);
-		return;
-	}
-
-	pcm = (int16_t *)net_buf_pull_mem(buffer, size);
-
-	/* 'size' is in bytes, containing 1ms, 48kHz, stereo, 2 bytes per sample.
-	 * Take left channel and do a simple downsample to 16kHz/24Khz
-	 * matching the broadcast preset.
-	 */
-
-	ratio = USB_SAMPLE_RATE / USB_DOWNSAMPLE_RATE;
-	nsamples = size / (sizeof(int16_t) * USB_CHANNELS * ratio);
-	for (size_t i = 0, j = 0; i < nsamples; i++, j += USB_CHANNELS * ratio) {
-		usb_pcm_data[0][i] = pcm[j];
-		usb_pcm_data[1][i] = pcm[j + 1];
-	}
-
-	for (size_t i = 0U; i < MIN(ARRAY_SIZE(streams), 2); i++) {
-		const uint32_t size_put =
-			ring_buf_put(&(streams[i].audio_ring_buf), (uint8_t *)(usb_pcm_data[i]),
-				     nsamples * USB_BYTES_PER_SAMPLE);
-		if (size_put < nsamples * USB_BYTES_PER_SAMPLE) {
-			printk("Not enough room for samples in %s buffer: %u < %u, total capacity: "
-			       "%u\n",
-			       i == 0 ? "left" : "right", size_put, nsamples * USB_BYTES_PER_SAMPLE,
-			       ring_buf_capacity_get(&(streams[i].audio_ring_buf)));
-		}
-	}
-
-	count++;
-	if ((count % 1000) == 0) {
-		printk("USB Data received (count = %d)\n", count);
-	}
-
-	net_buf_unref(buffer);
-}
-
-static const struct usb_audio_ops ops = {.data_received_cb = data_received};
-#endif /* defined(CONFIG_USB_DEVICE_AUDIO) */
-#endif /* defined(CONFIG_LIBLC3) */
 
 static void stream_started_cb(struct bt_bap_stream *stream)
 {
@@ -356,15 +271,7 @@ static void stream_stopped_cb(struct bt_bap_stream *stream, uint8_t reason)
 
 static void stream_sent_cb(struct bt_bap_stream *stream)
 {
-#if defined(CONFIG_LIBLC3)
 	k_sem_give(&lc3_encoder_sem);
-#else
-	/* If no LC3 encoder is used, just send mock data directly */
-	struct broadcast_source_stream *source_stream =
-		CONTAINER_OF(stream, struct broadcast_source_stream, stream);
-
-	send_data(source_stream);
-#endif
 }
 
 static struct bt_bap_stream_ops stream_ops = {
@@ -437,39 +344,9 @@ int main(void)
 		send_pcm_data[i] = i;
 	}
 
-#if defined(CONFIG_LIBLC3)
-#if defined(CONFIG_USB_DEVICE_AUDIO)
-	const struct device *hs_dev;
 
-	hs_dev = DEVICE_DT_GET(DT_NODELABEL(hs_0));
-
-	if (!device_is_ready(hs_dev)) {
-		printk("Device USB Headset is not ready\n");
-		return 0;
-	}
-
-	printk("Found USB Headset Device\n");
-
-	(void)memset(streams, 0, sizeof(streams));
-
-	for (size_t i = 0U; i < ARRAY_SIZE(streams); i++) {
-		ring_buf_init(&(streams[i].audio_ring_buf), sizeof(streams[i]._ring_buffer_memory),
-			      streams[i]._ring_buffer_memory);
-		printk("Initialized ring buf %zu: capacity: %u\n", i,
-		       ring_buf_capacity_get(&(streams[i].audio_ring_buf)));
-	}
-
-	usb_audio_register(hs_dev, &ops);
-
-	err = usb_enable(NULL);
-	if (err && err != -EALREADY) {
-		printk("Failed to enable USB (%d)", err);
-		return 0;
-	}
-
-#endif /* defined(CONFIG_USB_DEVICE_AUDIO) */
 	k_thread_start(encoder);
-#endif /* defined(CONFIG_LIBLC3) */
+
 
 	while (true) {
 		/* Broadcast Audio Streaming Endpoint advertising data */
@@ -570,11 +447,7 @@ int main(void)
 				stream_sent_cb(&streams[i].stream);
 			}
 		}
-
-#if defined(CONFIG_LIBLC3) && defined(CONFIG_USB_DEVICE_AUDIO)
-		/* Never stop streaming when using USB Audio as input */
-		k_sleep(K_FOREVER);
-#endif /* defined(CONFIG_LIBLC3) && defined(CONFIG_USB_DEVICE_AUDIO) */
+		/*
 		printk("Waiting %u seconds before stopped\n", BROADCAST_SOURCE_LIFETIME);
 		k_sleep(K_SECONDS(BROADCAST_SOURCE_LIFETIME));
 		printk("Stopping broadcast source\n");
@@ -584,8 +457,9 @@ int main(void)
 			printk("Unable to stop broadcast source: %d\n", err);
 			return 0;
 		}
-
+		*/
 		/* Wait for all to be stopped */
+		/*
 		for (size_t i = 0U; i < ARRAY_SIZE(streams); i++) {
 			k_sem_take(&sem_stopped, K_FOREVER);
 		}
@@ -618,6 +492,7 @@ int main(void)
 			printk("Failed to delete extended advertising (err %d)\n", err);
 			return 0;
 		}
+		*/
 	}
 	return 0;
 }
