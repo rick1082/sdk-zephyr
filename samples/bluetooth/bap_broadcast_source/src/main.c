@@ -67,28 +67,24 @@ static struct bt_bap_lc3_preset preset_active = BT_BAP_LC3_BROADCAST_PRESET_24_2
 
 #include <math.h>
 
+#include <zephyr/audio/dmic.h>
+#define MAX_SAMPLE_RATE  16000
+#define SAMPLE_BIT_WIDTH 16
+#define BYTES_PER_SAMPLE sizeof(int16_t)
+/* Milliseconds to wait for a block to be read. */
+#define READ_TIMEOUT     1000
+/* Size of a block for 100 ms of audio data. */
+#define BLOCK_SIZE(_sample_rate, _number_of_channels) \
+	(BYTES_PER_SAMPLE * (_sample_rate / 100) * _number_of_channels)
 
-
-/**
- * Use the math lib to generate a sine-wave using 16 bit samples into a buffer.
- *
- * @param buf Destination buffer
- * @param length_us Length of the buffer in microseconds
- * @param frequency_hz frequency in Hz
- * @param sample_rate_hz sample-rate in Hz.
+/* Driver will allocate blocks from this slab to receive audio data into them.
+ * Application, after getting a given block from the driver and processing its
+ * data, needs to free that block.
  */
-static void fill_audio_buf_sin(int16_t *buf, int length_us, int frequency_hz, int sample_rate_hz)
-{
-	const int sine_period_samples = sample_rate_hz / frequency_hz;
-	const unsigned int num_samples = (length_us * sample_rate_hz) / USEC_PER_SEC;
-	const float step = 2 * 3.1415f / sine_period_samples;
-
-	for (unsigned int i = 0; i < num_samples; i++) {
-		const float sample = sinf(i * step);
-
-		buf[i] = (int16_t)(AUDIO_VOLUME * sample);
-	}
-}
+#define MAX_BLOCK_SIZE   BLOCK_SIZE(MAX_SAMPLE_RATE, 2)
+#define BLOCK_COUNT      8
+K_MEM_SLAB_DEFINE_STATIC(mem_slab, MAX_BLOCK_SIZE, BLOCK_COUNT, 8);
+static const struct device *const dmic_dev = DEVICE_DT_GET(DT_NODELABEL(dmic_dev));
 
 static struct broadcast_source_stream {
 	struct bt_bap_stream stream;
@@ -101,7 +97,7 @@ NET_BUF_POOL_FIXED_DEFINE(tx_pool, TOTAL_BUF_NEEDED, BT_ISO_SDU_BUF_SIZE(CONFIG_
 			  CONFIG_BT_CONN_TX_USER_DATA_SIZE, NULL);
 
 static int16_t send_pcm_data[MAX_NUM_SAMPLES];
-static uint16_t seq_num;
+
 static bool stopping;
 
 static K_SEM_DEFINE(sem_started, 0U, ARRAY_SIZE(streams));
@@ -145,7 +141,6 @@ static void send_data(struct broadcast_source_stream *source_stream)
 	}
 
 	net_buf_add_mem(buf, lc3_encoded_buffer, preset_active.qos.sdu);
-
 
 	ret = bt_bap_stream_send(stream, buf, source_stream->seq_num++);
 	if (ret < 0) {
@@ -201,9 +196,6 @@ static void init_lc3_thread(void *arg1, void *arg2, void *arg3)
 		return;
 	}
 
-
-	/* If USB is not used as a sound source, generate a sine wave */
-	fill_audio_buf_sin(send_pcm_data, frame_duration_us, AUDIO_TONE_FREQUENCY_HZ, freq_hz);
 	ret = sw_codec_lc3_init(NULL, NULL, MAX_FRAME_DURATION_US);
 	if (ret) {
 		printk("sw_codec_lc3_init failed (ret %d)\n", ret);
@@ -216,35 +208,31 @@ static void init_lc3_thread(void *arg1, void *arg2, void *arg3)
 		printk("LC3 encoder initialized, PCM bytes required for encoding: %u\n",
 		       pcm_bytes_req_enc);
 	}
-	while (true) {
-		for (size_t i = 0U; i < ARRAY_SIZE(streams); i++) {
-			k_sem_take(&lc3_encoder_sem, K_FOREVER);
-		}
-		for (size_t i = 0U; i < ARRAY_SIZE(streams); i++) {
-			send_data(&streams[i]);
-		}
-	}
-#if 0
-	/* Create the encoder instance. This shall complete before stream_started() is called. */
-	for (size_t i = 0U; i < ARRAY_SIZE(streams); i++) {
-		printk("Initializing lc3 encoder for stream %zu\n", i);
-		streams[i].lc3_encoder = lc3_setup_encoder(frame_duration_us, freq_hz, 0,
-							   &streams[i].lc3_encoder_mem);
+	void *buffer;
+	uint32_t size;
 
-		if (streams[i].lc3_encoder == NULL) {
-			printk("ERROR: Failed to setup LC3 encoder - wrong parameters?\n");
-		}
+	ret = dmic_trigger(dmic_dev, DMIC_TRIGGER_START);
+	if (ret < 0) {
+		printk("START trigger failed: %d\n", ret);
 	}
 
 	while (true) {
 		for (size_t i = 0U; i < ARRAY_SIZE(streams); i++) {
 			k_sem_take(&lc3_encoder_sem, K_FOREVER);
 		}
+
+		ret = dmic_read(dmic_dev, 0, &buffer, &size, 10);
+		if (ret < 0) {
+			printk("read failed: %d\n", ret);
+		}
+		memcpy(send_pcm_data, buffer, sizeof(send_pcm_data));
+
+		k_mem_slab_free(&mem_slab, buffer);
+
 		for (size_t i = 0U; i < ARRAY_SIZE(streams); i++) {
 			send_data(&streams[i]);
 		}
 	}
-#endif
 }
 
 #define LC3_ENCODER_STACK_SIZE 4 * 4096
@@ -327,10 +315,55 @@ static int setup_broadcast_source(struct bt_bap_broadcast_source **source)
 	return 0;
 }
 
+
+
 int main(void)
 {
 	struct bt_le_ext_adv *adv;
 	int err;
+
+
+	int ret;
+
+	if (!device_is_ready(dmic_dev)) {
+		printk("%s is not ready\n", dmic_dev->name);
+		return 0;
+	}
+
+	struct pcm_stream_cfg stream = {
+		.pcm_width = SAMPLE_BIT_WIDTH,
+		.mem_slab  = &mem_slab,
+	};
+	struct dmic_cfg cfg = {
+		.io = {
+			/* These fields can be used to limit the PDM clock
+			 * configurations that the driver is allowed to use
+			 * to those supported by the microphone.
+			 */
+			.min_pdm_clk_freq = 1000000,
+			.max_pdm_clk_freq = 3500000,
+			.min_pdm_clk_dc   = 40,
+			.max_pdm_clk_dc   = 60,
+		},
+		.streams = &stream,
+		.channel = {
+			.req_num_streams = 1,
+		},
+	};
+
+	cfg.channel.req_num_chan = 1;
+	cfg.channel.req_chan_map_lo =
+		dmic_build_channel_map(0, 0, PDM_CHAN_LEFT);
+	cfg.streams[0].pcm_rate = MAX_SAMPLE_RATE;
+	cfg.streams[0].block_size =
+		BLOCK_SIZE(cfg.streams[0].pcm_rate, cfg.channel.req_num_chan);
+
+	ret = dmic_configure(dmic_dev, &cfg);
+	if (ret < 0) {
+		printk("Failed to configure the driver: %d\n", ret);
+		return ret;
+	}
+
 
 	err = bt_enable(NULL);
 	if (err) {
@@ -389,7 +422,7 @@ int main(void)
 		ext_ad[0].type = BT_DATA_SVC_DATA16;
 		ext_ad[0].data_len = ad_buf.len;
 		ext_ad[0].data = ad_buf.data;
-		ext_ad[1] = (struct bt_data)BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME,
+		ext_ad[1] = (struct bt_data)BT_DATA(BT_DATA_BROADCAST_NAME, CONFIG_BT_DEVICE_NAME,
 						    sizeof(CONFIG_BT_DEVICE_NAME) - 1);
 		err = bt_le_ext_adv_set_data(adv, ext_ad, 2, NULL, 0);
 		if (err != 0) {
@@ -447,52 +480,7 @@ int main(void)
 				stream_sent_cb(&streams[i].stream);
 			}
 		}
-		/*
-		printk("Waiting %u seconds before stopped\n", BROADCAST_SOURCE_LIFETIME);
-		k_sleep(K_SECONDS(BROADCAST_SOURCE_LIFETIME));
-		printk("Stopping broadcast source\n");
-		stopping = true;
-		err = bt_bap_broadcast_source_stop(broadcast_source);
-		if (err != 0) {
-			printk("Unable to stop broadcast source: %d\n", err);
-			return 0;
-		}
-		*/
-		/* Wait for all to be stopped */
-		/*
-		for (size_t i = 0U; i < ARRAY_SIZE(streams); i++) {
-			k_sem_take(&sem_stopped, K_FOREVER);
-		}
-		printk("Broadcast source stopped\n");
-
-		printk("Deleting broadcast source\n");
-		err = bt_bap_broadcast_source_delete(broadcast_source);
-		if (err != 0) {
-			printk("Unable to delete broadcast source: %d\n", err);
-			return 0;
-		}
-		printk("Broadcast source deleted\n");
-		broadcast_source = NULL;
-		seq_num = 0;
-
-		err = bt_le_per_adv_stop(adv);
-		if (err) {
-			printk("Failed to stop periodic advertising (err %d)\n", err);
-			return 0;
-		}
-
-		err = bt_le_ext_adv_stop(adv);
-		if (err) {
-			printk("Failed to stop extended advertising (err %d)\n", err);
-			return 0;
-		}
-
-		err = bt_le_ext_adv_delete(adv);
-		if (err) {
-			printk("Failed to delete extended advertising (err %d)\n", err);
-			return 0;
-		}
-		*/
+		k_sleep(K_MSEC(1000));
 	}
 	return 0;
 }
