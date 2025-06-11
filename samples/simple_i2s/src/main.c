@@ -381,10 +381,14 @@ void tlv320_setup(void)
 	//     D3=0 (Left DAC not muted), D2=0 (Right DAC not muted)
 	//     D1-D0=00 (Independent volume control)
 	dac_i2c_write(&dev_i2c, 0x40, 0x00); // Unmute DAC left and right channels
+
+	dac_i2c_write(&dev_i2c, 0x00, 0x00);    // switch to Page 0
 }
 
 int main(void)
 {
+	static const struct i2c_dt_spec dev_i2c = I2C_DT_SPEC_GET(I2C_NODE);
+
 	printf("Hello I2S! %s\n", CONFIG_BOARD_TARGET);
 	gpio_pin_configure_dt(&led, GPIO_OUTPUT);
 	gpio_pin_configure_dt(&rst, GPIO_OUTPUT);
@@ -401,7 +405,43 @@ int main(void)
 	audio_i2s_set_next_buf((const uint8_t *)i2s_tx_buf_b, (uint32_t *)i2s_rx_buf_b);
 
 	while (1) {
+		printk("speed up, 48000\n");
         k_sleep(K_MSEC(1000)); // Main loop, can add more functionality here
+
+		printk("speed up, 48375\n");
+		//dac_i2c_write(&dev_i2c, 0x0D, (127 >> 8) & 0x03); // DOSR MSB = 0
+		//dac_i2c_write(&dev_i2c, 0x0E, 127 & 0xFF);        // DOSR LSB = 127
+		dac_i2c_write(&dev_i2c, 0x07, 0xFE); // D[13:8] for D=3760
+		dac_i2c_write(&dev_i2c, 0x08, 0xBF); // D[7:0] for D=3760
+			dac_i2c_write(&dev_i2c, 0x05,
+		      (1 << 7) | (0b001 << 4) | (0b0001 << 0)); // Power up PLL, P=1, R=1
+		k_sleep(K_MSEC(1000)); // Main loop, can add more functionality here
+
+		printk("speed up, 48000\n");
+		//dac_i2c_write(&dev_i2c, 0x0D, 0x00); // DOSR MSB (D9-D8) = 00
+		//dac_i2c_write(&dev_i2c, 0x0E, 0x80); // DOSR LSB (D7-D0) = 128 (Total DOSR = 128)
+		dac_i2c_write(&dev_i2c, 0x07, 0x0E); // D[13:8] for D=3760
+		dac_i2c_write(&dev_i2c, 0x08, 0xB0); // D[7:0] for D=3760		
+			dac_i2c_write(&dev_i2c, 0x05,
+		      (1 << 7) | (0b001 << 4) | (0b0001 << 0)); // Power up PLL, P=1, R=1
+		k_sleep(K_MSEC(1000)); // Main loop, can add more functionality here
+
+		printk("speed down, 47880\n");
+		//dac_i2c_write(&dev_i2c, 0x0D, (129 >> 8) & 0x03); // DOSR MSB = 0
+		//dac_i2c_write(&dev_i2c, 0x0E, 129 & 0xFF);        // DOSR LSB = 129
+		dac_i2c_write(&dev_i2c, 0x07, 0xFE); // D[13:8] for D=3760
+		dac_i2c_write(&dev_i2c, 0x08, 0xA0); // D[7:0] for D=3760
+			dac_i2c_write(&dev_i2c, 0x05,
+		      (1 << 7) | (0b001 << 4) | (0b0001 << 0)); // Power up PLL, P=1, R=1
+		k_sleep(K_MSEC(1000)); // Main loop, can add more functionality here
+
+		//dac_i2c_write(&dev_i2c, 0x0D, 0x00); // DOSR MSB (D9-D8) = 00
+		//dac_i2c_write(&dev_i2c, 0x0E, 0x80); // DOSR LSB (D7-D0) = 128 (Total DOSR = 128)
+		dac_i2c_write(&dev_i2c, 0x07, 0xFE); // D[13:8] for D=3760
+		dac_i2c_write(&dev_i2c, 0x08, 0xB0); // D[7:0] for D=3760
+			dac_i2c_write(&dev_i2c, 0x05,
+		      (1 << 7) | (0b001 << 4) | (0b0001 << 0)); // Power up PLL, P=1, R=1
+
 	}
 	return 0;
 }
