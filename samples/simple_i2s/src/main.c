@@ -40,7 +40,24 @@ static nrfx_i2s_config_t cfg = {
 	.channels = NRF_I2S_CHANNELS_STEREO,
 	.mck_setup = NRF_I2S_MCK_32MDIV2,
 };
+#include <nrfx_dppi.h>
+#include <nrfx_grtc.h>
+#include <nrfx_timer.h>
+static uint8_t dppi_channel_i2s_frame_start;
+static uint8_t dppi_channel_curr_time_capture = 0; // Channel for capturing current time
 
+
+#define AUDIO_SYNC_TIMER_INSTANCE_NUMBER 20
+const nrfx_timer_t audio_sync_timer_instance =
+	NRFX_TIMER_INSTANCE(AUDIO_SYNC_TIMER_INSTANCE_NUMBER);
+static nrfx_timer_config_t timer_cfg = { .frequency = NRFX_MHZ_TO_HZ(1UL),
+				   .mode = NRF_TIMER_MODE_TIMER,
+				   .bit_width = NRF_TIMER_BIT_WIDTH_32,
+				   .interrupt_priority = NRFX_TIMER_DEFAULT_CONFIG_IRQ_PRIORITY,
+				   .p_context = NULL };
+static void event_handler(nrf_timer_event_t event_type, void *ctx)
+{
+}
 #include <math.h>
 #define I2S_SAMPLES_NUM 48
 static uint16_t i2s_tx_buf_a[I2S_SAMPLES_NUM * 2]; // 2 channels, 16 bits each
@@ -81,9 +98,23 @@ void audio_i2s_set_next_buf(const uint8_t *tx_buf, uint32_t *rx_buf)
 		printf("Failed to set next buffers: %x\n", ret);
 	}
 }
+#define AUDIO_SYNC_TIMER_I2S_FRAME_START_EVT_CAPTURE NRF_TIMER_TASK_CAPTURE0
+#define AUDIO_SYNC_TIMER_I2S_FRAME_START_EVT_CAPTURE_CHANNEL 0
+#define AUDIO_SYNC_TIMER_CURR_TIME_CAPTURE_CHANNEL 1
 
 static void i2s_comp_handler(nrfx_i2s_buffers_t const *released_bufs, uint32_t status)
 {
+	static uint32_t prev_frame_start_ts = 0;
+	static int i;
+	i++;
+	uint32_t frame_start_ts = nrfx_timer_capture_get(
+		&audio_sync_timer_instance, AUDIO_SYNC_TIMER_I2S_FRAME_START_EVT_CAPTURE_CHANNEL);
+		//printf("I2S frame start timestamp: %u\n", frame_start_ts);
+	if (i % 1000 == 0) {
+		printf("diff %d\n", frame_start_ts - prev_frame_start_ts);
+	}
+
+	prev_frame_start_ts = frame_start_ts;	
 	if (status == NRFX_I2S_STATUS_NEXT_BUFFERS_NEEDED) {
         
 		if ((uint16_t *)released_bufs->p_tx_buffer == i2s_tx_buf_a) {
@@ -125,8 +156,7 @@ void audio_i2s_init(void)
 		return;
 	}
 
-	IRQ_CONNECT(DT_IRQN(I2S_NL), DT_IRQ(I2S_NL, priority), nrfx_isr, nrfx_i2s_20_irq_handler,
-		    0);
+	IRQ_CONNECT(DT_IRQN(I2S_NL), DT_IRQ(I2S_NL, priority), nrfx_isr, nrfx_i2s_20_irq_handler, 0);
 	irq_enable(DT_IRQN(I2S_NL));
 
 	ret = nrfx_i2s_init(&i2s_inst, &cfg, i2s_comp_handler);
@@ -183,8 +213,8 @@ void dac_i2c_write(const struct i2c_dt_spec *dev_i2c, uint8_t reg, uint8_t value
 	if (ret != 0) {
 		printf("Failed to write to I2C device address %x at reg. %x\n", dev_i2c->addr, reg);
 	} else {
-		printf("I2C device address %x at reg. %x written successfully\n", dev_i2c->addr,
-		       reg);
+		//printf("I2C device address %x at reg. %x written successfully\n", dev_i2c->addr,
+		//       reg);
 	}
 }
 
@@ -385,6 +415,58 @@ void tlv320_setup(void)
 	dac_i2c_write(&dev_i2c, 0x00, 0x00);    // switch to Page 0
 }
 
+
+static int audio_sync_timer_init(void)
+{
+	nrfx_err_t ret;
+	nrfx_dppi_t dppi = NRFX_DPPI_INSTANCE(20);
+
+
+	ret = nrfx_timer_init(&audio_sync_timer_instance, &timer_cfg, event_handler);
+	if (ret - NRFX_ERROR_BASE_NUM) {
+		printf("nrfx timer init error - Return value: %x\n", ret);
+		return ret;
+	}
+
+	//nrfx_timer_enable(&audio_sync_timer_instance);
+
+	/* Initialize capturing of I2S frame start event timestamps */
+	ret = nrfx_dppi_channel_alloc(&dppi, &dppi_channel_i2s_frame_start);
+	if (ret - NRFX_ERROR_BASE_NUM) {
+		printf("nrfx DPPI channel alloc error (I2S frame start): %d\n", ret);
+		return -ENOMEM;
+	}
+
+
+	nrf_timer_subscribe_set(audio_sync_timer_instance.p_reg, NRF_TIMER_TASK_CAPTURE0,
+				dppi_channel_i2s_frame_start);
+
+	nrf_i2s_publish_set(NRF_I2S20, NRF_I2S_EVENT_FRAMESTART, dppi_channel_i2s_frame_start);			
+
+	ret = nrfx_dppi_channel_enable(&dppi, dppi_channel_i2s_frame_start);
+	if (ret - NRFX_ERROR_BASE_NUM) {
+		printf("nrfx DPPI channel enable error (I2S frame start): %d\n", ret);
+		return -EIO;
+	}
+
+	/* Initialize capturing of current timestamps */
+	ret = nrfx_dppi_channel_alloc(&dppi, &dppi_channel_curr_time_capture);
+	if (ret - NRFX_ERROR_BASE_NUM) {
+		printk("nrfx DPPI channel current time capture - Return value: %d\n", ret);
+		return -ENOMEM;
+	}
+
+	ret = nrfx_dppi_channel_enable(&dppi, dppi_channel_curr_time_capture);
+	if (ret - NRFX_ERROR_BASE_NUM) {
+		printk("nrfx DPPI channel current time capture - Return value: %d", ret);
+		return -EIO;
+	}
+
+	nrfx_timer_enable(&audio_sync_timer_instance);
+	printf("audio_sync_timer_init\n");
+	return 0;
+}
+
 int main(void)
 {
 	static const struct i2c_dt_spec dev_i2c = I2C_DT_SPEC_GET(I2C_NODE);
@@ -399,6 +481,7 @@ int main(void)
 	gpio_pin_set_dt(&rst, 1); // Reset high
 	tlv320_setup();
 
+	audio_sync_timer_init();
 	audio_i2s_init();
 
 	audio_i2s_start((uint8_t *)i2s_tx_buf_a, (uint32_t *)i2s_rx_buf_a);
