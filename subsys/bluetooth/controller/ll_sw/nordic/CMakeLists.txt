@@ -5,8 +5,19 @@ zephyr_library_link_libraries(subsys__bluetooth)
 
 zephyr_library_sources(
   lll/lll.c
-  lll/lll_clock.c
   )
+
+if (CONFIG_SOC_SERIES_NRF54HX)
+  zephyr_library_sources(
+    lll/lll_clock_dummy.c
+  )
+else()
+  zephyr_library_sources(
+    lll/lll_clock.c
+  )
+endif()
+
+
 if (CONFIG_BT_BROADCASTER)
   zephyr_library_sources(
     lll/lll_adv.c
