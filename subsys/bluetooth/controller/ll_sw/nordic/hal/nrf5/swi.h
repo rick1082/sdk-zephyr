@@ -70,8 +70,8 @@
 #define HAL_SWI_WORKER_IRQ GRTC_1_IRQn
 #define HAL_RTC_IRQn       GRTC_1_IRQn
 #else /* !CONFIG_BT_CTLR_NRF_GRTC */
-#define HAL_SWI_WORKER_IRQ RTC10_IRQn
-#define HAL_RTC_IRQn       RTC10_IRQn
+#define HAL_SWI_WORKER_IRQ RTC_IRQn
+#define HAL_RTC_IRQn       RTC_IRQn
 #endif /* !CONFIG_BT_CTLR_NRF_GRTC */
 
 #if !defined(CONFIG_BT_CTLR_LOW_LAT) && \

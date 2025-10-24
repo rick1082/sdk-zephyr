@@ -6,11 +6,11 @@
 
 /* Use the NRF_RTC instance for coarse radio event scheduling */
 #if !defined(CONFIG_BT_CTLR_NRF_GRTC)
-#define NRF_RTC NRF_RTC10
+//#define NRF_RTC NRF_RTC
 #endif /* !CONFIG_BT_CTLR_NRF_GRTC */
 
 #undef EVENT_TIMER_ID
-#define EVENT_TIMER_ID 10
+#define EVENT_TIMER_ID 020
 
 #undef EVENT_TIMER
 #define EVENT_TIMER _CONCAT(NRF_TIMER, EVENT_TIMER_ID)
@@ -445,230 +445,158 @@ static inline uint32_t hal_radio_phy_mode_get(uint8_t phy, uint8_t flags)
 
 static inline int8_t hal_radio_tx_power_max_get(void)
 {
-	return 8; /* +8 dBm */
+    return 10; /* +10 dBm */
 }
 
 static inline int8_t hal_radio_tx_power_min_get(void)
 {
-	return -46; /* -46 dBm */
+    return -70; /* -70 dBm */
 }
 
 static inline int8_t hal_radio_tx_power_floor(int8_t tx_power_lvl)
 {
-	if (tx_power_lvl >= 8) {
-		return 8;
-	}
-
-	if (tx_power_lvl >= 7) {
-		return 7;
-	}
-
-	if (tx_power_lvl >= 6) {
-		return 6;
-	}
-
-	if (tx_power_lvl >= 5) {
-		return 5;
-	}
-
-	if (tx_power_lvl >= 4) {
-		return 4;
-	}
-
-	if (tx_power_lvl >= 3) {
-		return 3;
-	}
-
-	if (tx_power_lvl >= 2) {
-		return 2;
-	}
-
-	if (tx_power_lvl >= 1) {
-		return 1;
-	}
-
-	if (tx_power_lvl >= 0) {
-		return 0;
-	}
-
-	if (tx_power_lvl >= -1) {
-		return -1;
-	}
-
-	if (tx_power_lvl >= -2) {
-		return -2;
-	}
-
-	if (tx_power_lvl >= -3) {
-		return -3;
-	}
-
-	if (tx_power_lvl >= -4) {
-		return -4;
-	}
-
-	if (tx_power_lvl >= -5) {
-		return -5;
-	}
-
-	if (tx_power_lvl >= -6) {
-		return -6;
-	}
-
-	if (tx_power_lvl >= -7) {
-		return -7;
-	}
-
-	if (tx_power_lvl >= -8) {
-		return -8;
-	}
-
-	if (tx_power_lvl >= -9) {
-		return -9;
-	}
-
-	if (tx_power_lvl >= -10) {
-		return -10;
-	}
-
-	if (tx_power_lvl >= -12) {
-		return -12;
-	}
-
-	if (tx_power_lvl >= -14) {
-		return -14;
-	}
-
-	if (tx_power_lvl >= -16) {
-		return -16;
-	}
-
-	if (tx_power_lvl >= -20) {
-		return -20;
-	}
-
-	if (tx_power_lvl >= -26) {
-		return -26;
-	}
-
-	if (tx_power_lvl >= -40) {
-		return -40;
-	}
-
-	return -46;
+    if (tx_power_lvl >= 10) {
+        return 10;
+    }
+    if (tx_power_lvl >= 9) {
+        return 9;
+    }
+    if (tx_power_lvl >= 8) {
+        return 8;
+    }
+    if (tx_power_lvl >= 7) {
+        return 7;
+    }
+    if (tx_power_lvl >= 6) {
+        return 6;
+    }
+    if (tx_power_lvl >= 5) {
+        return 5;
+    }
+    if (tx_power_lvl >= 4) {
+        return 4;
+    }
+    if (tx_power_lvl >= 3) {
+        return 3;
+    }
+    if (tx_power_lvl >= 2) {
+        return 2;
+    }
+    if (tx_power_lvl >= 1) {
+        return 1;
+    }
+    if (tx_power_lvl >= 0) {
+        return 0;
+    }
+    if (tx_power_lvl >= -1) {
+        return -1;
+    }
+    if (tx_power_lvl >= -2) {
+        return -2;
+    }
+    /* Step from -2 to -4 */
+    if (tx_power_lvl >= -4) {
+        return -4;
+    }
+    /* Step from -4 to -8 */
+    if (tx_power_lvl >= -8) {
+        return -8;
+    }
+    /* Step from -8 to -12 */
+    if (tx_power_lvl >= -12) {
+        return -12;
+    }
+    /* Step from -12 to -16 */
+    if (tx_power_lvl >= -16) {
+        return -16;
+    }
+    /* Step from -16 to -20 */
+    if (tx_power_lvl >= -20) {
+        return -20;
+    }
+    /* Step from -20 to -30 */
+    if (tx_power_lvl >= -30) {
+        return -30;
+    }
+    /* Step from -30 to -40 */
+    if (tx_power_lvl >= -40) {
+        return -40;
+    }
+    /* Step from -40 to -70 */
+    return -70;
 }
 
 static inline uint32_t hal_radio_tx_power_value(int8_t tx_power_lvl)
 {
-	if (tx_power_lvl >= 8) {
-		return RADIO_TXPOWER_TXPOWER_Pos8dBm;
-	}
-
-	if (tx_power_lvl >= 7) {
-		return RADIO_TXPOWER_TXPOWER_Pos7dBm;
-	}
-
-	if (tx_power_lvl >= 6) {
-		return RADIO_TXPOWER_TXPOWER_Pos6dBm;
-	}
-
-	if (tx_power_lvl >= 5) {
-		return RADIO_TXPOWER_TXPOWER_Pos5dBm;
-	}
-
-	if (tx_power_lvl >= 4) {
-		return RADIO_TXPOWER_TXPOWER_Pos4dBm;
-	}
-
-	if (tx_power_lvl >= 3) {
-		return RADIO_TXPOWER_TXPOWER_Pos3dBm;
-	}
-
-	if (tx_power_lvl >= 2) {
-		return RADIO_TXPOWER_TXPOWER_Pos2dBm;
-	}
-
-	if (tx_power_lvl >= 1) {
-		return RADIO_TXPOWER_TXPOWER_Pos1dBm;
-	}
-
-	if (tx_power_lvl >= 0) {
-		return RADIO_TXPOWER_TXPOWER_0dBm;
-	}
-
-	if (tx_power_lvl >= -1) {
-		return RADIO_TXPOWER_TXPOWER_Neg1dBm;
-	}
-
-	if (tx_power_lvl >= -2) {
-		return RADIO_TXPOWER_TXPOWER_Neg2dBm;
-	}
-
-	if (tx_power_lvl >= -3) {
-		return RADIO_TXPOWER_TXPOWER_Neg3dBm;
-	}
-
-	if (tx_power_lvl >= -4) {
-		return RADIO_TXPOWER_TXPOWER_Neg4dBm;
-	}
-
-	if (tx_power_lvl >= -5) {
-		return RADIO_TXPOWER_TXPOWER_Neg5dBm;
-	}
-
-	if (tx_power_lvl >= -6) {
-		return RADIO_TXPOWER_TXPOWER_Neg6dBm;
-	}
-
-	if (tx_power_lvl >= -7) {
-		return RADIO_TXPOWER_TXPOWER_Neg7dBm;
-	}
-
-	if (tx_power_lvl >= -8) {
-		return RADIO_TXPOWER_TXPOWER_Neg8dBm;
-	}
-
-	if (tx_power_lvl >= -9) {
-		return RADIO_TXPOWER_TXPOWER_Neg9dBm;
-	}
-
-	if (tx_power_lvl >= -10) {
-		return RADIO_TXPOWER_TXPOWER_Neg10dBm;
-	}
-
-	if (tx_power_lvl >= -12) {
-		return RADIO_TXPOWER_TXPOWER_Neg12dBm;
-	}
-
-	if (tx_power_lvl >= -14) {
-		return RADIO_TXPOWER_TXPOWER_Neg14dBm;
-	}
-
-	if (tx_power_lvl >= -16) {
-		return RADIO_TXPOWER_TXPOWER_Neg16dBm;
-	}
-
-	if (tx_power_lvl >= -20) {
-		return RADIO_TXPOWER_TXPOWER_Neg20dBm;
-	}
-
-#if defined(RADIO_TXPOWER_TXPOWER_Neg26dBm)
-	if (tx_power_lvl >= -26) {
-		return RADIO_TXPOWER_TXPOWER_Neg26dBm;
-	}
-#endif
-
-#if defined(RADIO_TXPOWER_TXPOWER_Neg28dBm)
-	if (tx_power_lvl >= -28) {
-		return RADIO_TXPOWER_TXPOWER_Neg28dBm;
-	}
-#endif
-
-	if (tx_power_lvl >= -40) {
-		return RADIO_TXPOWER_TXPOWER_Neg40dBm;
-	}
-
-	return RADIO_TXPOWER_TXPOWER_Neg46dBm;
+    if (tx_power_lvl >= 10) {
+        return RADIO_TXPOWER_TXPOWER_Pos10dBm;
+    }
+    if (tx_power_lvl >= 9) {
+        return RADIO_TXPOWER_TXPOWER_Pos9dBm;
+    }
+    if (tx_power_lvl >= 8) {
+        return RADIO_TXPOWER_TXPOWER_Pos8dBm;
+    }
+    if (tx_power_lvl >= 7) {
+        return RADIO_TXPOWER_TXPOWER_Pos7dBm;
+    }
+    if (tx_power_lvl >= 6) {
+        return RADIO_TXPOWER_TXPOWER_Pos6dBm;
+    }
+    if (tx_power_lvl >= 5) {
+        return RADIO_TXPOWER_TXPOWER_Pos5dBm;
+    }
+    if (tx_power_lvl >= 4) {
+        return RADIO_TXPOWER_TXPOWER_Pos4dBm;
+    }
+    if (tx_power_lvl >= 3) {
+        return RADIO_TXPOWER_TXPOWER_Pos3dBm;
+    }
+    if (tx_power_lvl >= 2) {
+        return RADIO_TXPOWER_TXPOWER_Pos2dBm;
+    }
+    if (tx_power_lvl >= 1) {
+        return RADIO_TXPOWER_TXPOWER_Pos1dBm;
+    }
+    if (tx_power_lvl >= 0) {
+        return RADIO_TXPOWER_TXPOWER_0dBm;
+    }
+    if (tx_power_lvl >= -1) {
+        return RADIO_TXPOWER_TXPOWER_Neg1dBm;
+    }
+    if (tx_power_lvl >= -2) {
+        return RADIO_TXPOWER_TXPOWER_Neg2dBm;
+    }
+    /* Step from -2 to -4 */
+    if (tx_power_lvl >= -4) {
+        return RADIO_TXPOWER_TXPOWER_Neg4dBm;
+    }
+    /* Step from -4 to -8 */
+    if (tx_power_lvl >= -8) {
+        return RADIO_TXPOWER_TXPOWER_Neg8dBm;
+    }
+    /* Step from -8 to -12 */
+    if (tx_power_lvl >= -12) {
+        return RADIO_TXPOWER_TXPOWER_Neg12dBm;
+    }
+    /* Step from -12 to -16 */
+    if (tx_power_lvl >= -16) {
+        return RADIO_TXPOWER_TXPOWER_Neg16dBm;
+    }
+    /* Step from -16 to -20 */
+    if (tx_power_lvl >= -20) {
+        return RADIO_TXPOWER_TXPOWER_Neg20dBm;
+    }
+    /* Step from -20 to -30 */
+    if (tx_power_lvl >= -30) {
+        return RADIO_TXPOWER_TXPOWER_Neg30dBm;
+    }
+    /* Step from -30 to -40 */
+    if (tx_power_lvl >= -40) {
+        return RADIO_TXPOWER_TXPOWER_Neg40dBm;
+    }
+    /* Step from -40 to -70 */
+    return RADIO_TXPOWER_TXPOWER_Neg70dBm;
 }
 
 static inline uint32_t hal_radio_tx_ready_delay_us_get(uint8_t phy, uint8_t flags)

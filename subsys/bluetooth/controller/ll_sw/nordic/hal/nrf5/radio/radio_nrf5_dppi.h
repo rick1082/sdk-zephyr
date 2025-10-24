@@ -9,6 +9,13 @@
 #define NRF_DPPIC NRF_DPPIC10
 #endif /* CONFIG_SOC_COMPATIBLE_NRF54LX */
 
+#if defined(CONFIG_SOC_SERIES_NRF54HX)
+#define NRF_DPPIC20 NRF_DPPIC020
+#define NRF_DPPIC NRF_DPPIC020
+//#define NRF_PPIB21 NRF_PPIB_133
+//#define NRF_PPIB11 NRF_PPIB_020
+#endif /* CONFIG_SOC_COMPATIBLE_NRF54LX */
+
 static inline void hal_radio_nrf_ppi_channels_enable(uint32_t mask)
 {
 	nrf_dppi_channels_enable(NRF_DPPIC, mask);

@@ -41,8 +41,10 @@
 #include "radio_nrf5340.h"
 #elif defined(CONFIG_SOC_SERIES_NRF54LX)
 #include "radio_nrf54lx.h"
+#include <hal/nrf_ppib.h>
 #elif defined(CONFIG_SOC_SERIES_NRF54HX)
 #include "radio_nrf54hx.h"
+#include <hal/nrf_ppib.h>
 #elif defined(CONFIG_BOARD_NRF52_BSIM)
 #include "radio_sim_nrf52.h"
 #elif defined(CONFIG_BOARD_NRF5340BSIM_NRF5340_CPUNET)
@@ -56,7 +58,6 @@
 
 #if defined(CONFIG_BT_CTLR_NRF_GRTC)
 #include <hal/nrf_grtc.h>
-#include <hal/nrf_ppib.h>
 #else /* !CONFIG_BT_CTLR_NRF_GRTC */
 #include <hal/nrf_rtc.h>
 #endif /* !CONFIG_BT_CTLR_NRF_GRTC */

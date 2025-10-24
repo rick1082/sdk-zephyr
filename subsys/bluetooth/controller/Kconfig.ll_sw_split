@@ -723,7 +723,7 @@ endchoice
 config BT_CTLR_XTAL_ADVANCED
 	bool "Advanced event preparation"
 	depends on BT_CTLR_XTAL_ADVANCED_SUPPORT
-	default y
+	default n
 	help
 	  Enables advanced event preparation offset ahead of radio tx/rx, taking
 	  into account predictive processing time requirements in preparation to
@@ -937,7 +937,7 @@ config BT_CTLR_NRF_GRTC
 	bool "Use nRF GRTC peripheral"
 	depends on SOC_COMPATIBLE_NRF54LX || SOC_SERIES_NRF54HX
 	select BT_TICKER_CNTR_FREE_RUNNING
-	default y
+	default n
 	help
 	  Enable use of nRF54Lx NRF_GRTC peripheral.
 
